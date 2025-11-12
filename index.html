@@ -11,6 +11,7 @@
     pre { background:#f8f9fa; padding:1rem; border-radius:.5rem; }
     .small-muted { font-size:0.9rem; color:#6c757d }
     canvas { background: white; }
+    #trajectoriesChart, #histChart { height: 350px !important; }
   </style>
 </head>
 <body>
@@ -59,11 +60,11 @@
     <section class="row mb-4">
       <div class="col-lg-7 mb-3">
         <h5>Sample trajectories (cumulative score)</h5>
-        <canvas id="trajectoriesChart" height="300"></canvas>
+        <canvas id="trajectoriesChart"></canvas>
       </div>
       <div class="col-lg-5">
         <h5>Final-score histogram vs Binomial</h5>
-        <canvas id="histChart" height="300"></canvas>
+        <canvas id="histChart"></canvas>
       </div>
     </section>
 
@@ -80,29 +81,21 @@
   </div>
 
   <script>
-    // ----------------- Utility math -----------------
     function binomialPmf(n, k, q) {
-      // compute Binomial(n,k) * q^k * (1-q)^(n-k) robustly
       if (k < 0 || k > n) return 0;
-      let logP = 0;
-      // product form for combinations to avoid huge factorials
-      // C(n,k) = product_{i=1..k} (n+1-i)/i
       let comb = 1;
       for (let i = 1; i <= k; ++i) comb *= (n + 1 - i) / i;
       return comb * Math.pow(q, k) * Math.pow(1 - q, n - k);
     }
 
-    function scoreToK(score, n) { return (score + n) / 2; }
     function kToScore(k, n) { return 2 * k - n; }
 
-    // ----------------- Simulation -----------------
     function simulate(n, m, p) {
-      // returns {trajectories: [array of scores over time], finalScores: [S values]}
       const trajectories = [];
       const finalScores = new Int16Array(m);
       for (let i = 0; i < m; ++i) {
         const path = new Int16Array(n + 1);
-        let s = 0; // cumulative score
+        let s = 0;
         path[0] = 0;
         for (let t = 1; t <= n; ++t) {
           const breach = Math.random() < p;
@@ -115,7 +108,6 @@
       return { trajectories, finalScores };
     }
 
-    // ----------------- Chart helpers -----------------
     let trajChart = null, histChart = null;
 
     function makeTrajChart(ctx) {
@@ -126,6 +118,8 @@
           animation: false,
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'none' },
+          transitions: { active: { animation: { duration: 0 } } },
           scales: {
             x: { title: { display: true, text: 'Week (t)' } },
             y: { title: { display: true, text: 'Cumulative score S_t' } }
@@ -144,6 +138,8 @@
           animation: false,
           responsive: true,
           maintainAspectRatio: false,
+          interaction: { mode: 'none' },
+          transitions: { active: { animation: { duration: 0 } } },
           scales: {
             x: { title: { display: true, text: 'Final total score S_n' } },
             y: { title: { display: true, text: 'Counts' } }
@@ -154,18 +150,14 @@
 
     function updateCharts(n, m, p, sampleCount, result) {
       const { trajectories, finalScores } = result;
-
-      // trajectories
       const labels = Array.from({length: n+1}, (_,i)=>i);
       const trajDatasets = [];
-      const sample = Math.min(sampleCount, trajectories.length);
-      // random sample of trajectories to draw
+      const sample = Math.min(sampleCount, trajectories.length, 20);
       const idxs = [];
       for (let i = 0; i < sample; ++i) idxs.push(Math.floor(Math.random() * trajectories.length));
       for (const idx of idxs) {
         trajDatasets.push({ label: 'traj', data: trajectories[idx], borderWidth: 1, borderColor: 'rgba(0,0,0,0.12)', pointRadius: 0 });
       }
-      // average trajectory
       const avg = Array(n+1).fill(0);
       for (let i = 0; i < trajectories.length; ++i) {
         const tr = trajectories[i];
@@ -178,17 +170,14 @@
       trajChart.data.datasets = trajDatasets;
       trajChart.update();
 
-      // histogram counts for S in [-n, -n+2, ..., n]
       const bins = [];
       for (let s = -n; s <= n; s += 2) bins.push(s);
       const counts = new Array(bins.length).fill(0);
       for (let i = 0; i < finalScores.length; ++i) {
         const s = finalScores[i];
-        const idx = (s + n) / 2; // maps -n..n step2 to 0..n
+        const idx = (s + n) / 2;
         counts[idx] += 1;
       }
-
-      // theoretical counts from Bin(n, q) where q = 1 - p
       const q = 1 - p;
       const theoCounts = [];
       for (let k = 0; k <= n; ++k) {
@@ -197,7 +186,6 @@
         theoCounts.push({ s: s, count: prob * m });
       }
 
-      // prepare labels and datasets
       histChart.data.labels = bins;
       histChart.data.datasets = [
         { label: 'empirical counts', data: counts, borderWidth: 1 },
@@ -205,13 +193,9 @@
       ];
       histChart.update();
 
-      // prepare downloadable CSV of final counts
-      window._lastCSV = {
-        n, m, p, bins, counts, theoCounts
-      };
+      window._lastCSV = { n, m, p, bins, counts, theoCounts };
     }
 
-    // ----------------- Wiring UI -----------------
     document.addEventListener('DOMContentLoaded', ()=>{
       const trajCtx = document.getElementById('trajectoriesChart').getContext('2d');
       const histCtx = document.getElementById('histChart').getContext('2d');
@@ -243,7 +227,6 @@
         const obj = window._lastCSV || null;
         if (!obj) { alert('Run a simulation first'); return; }
         const {n,m,p,bins,counts,theoCounts} = obj;
-        // CSV: S, empirical_count, theoretical_expected_count
         let csv = 'S,empirical_count,theoretical_expected_count\n';
         for (let i = 0; i < bins.length; ++i) {
           csv += `${bins[i]},${counts[i]},${theoCounts[i] ? theoCounts[i].count.toFixed(6) : ''}\n`;
@@ -259,7 +242,6 @@
         URL.revokeObjectURL(url);
       });
 
-      // auto-run once with defaults
       runBtn.click();
     });
   </script>
